@@ -1,0 +1,28 @@
+name: Update JSON Release
+
+on:
+  push:
+  workflow_dispatch:   # avvio manuale
+  schedule:
+    - cron: "0 0 * * *"   # ogni giorno a mezzanotte UTC
+
+jobs:
+  release-json:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Download JSON
+        run: curl -s https://aio.zxcvbn.fyi/r/repo.altstore.json -o repo.altstore.json
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "latest"
+          release_name: "Latest JSON"
+          body: "Release automatica con il JSON aggiornato."
+          files: repo.altstore.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
