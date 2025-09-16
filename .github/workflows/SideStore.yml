@@ -3,10 +3,10 @@ name: Fix JSON and Release
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 1 * * *" # ogni notte alle 01:00 UTC
+    - cron: "0 1 * * *"
 
 permissions:
-  contents: write   # serve per creare release
+  contents: write
 
 jobs:
   fix-json:
@@ -24,54 +24,56 @@ jobs:
       - name: Download original JSON
         run: curl -s https://aio.zxcvbn.fyi/r/repo.altstore.json -o repo.altstore.json
 
-      - name: Fix JSON (remove duplicates)
+      - name: Fix JSON (deduplicate and keep latest)
         run: |
           python << 'EOF'
           import json
+          from datetime import datetime
 
           with open("repo.altstore.json", "r", encoding="utf-8") as f:
               data = json.load(f)
 
           apps_by_id = {}
-          new_apps = []
 
           for app in data.get("apps", []):
               bid = app.get("bundleIdentifier")
               if not bid:
                   continue
 
-              if bid not in apps_by_id:
-                  # Prima volta che vediamo questa app
+              current_best = apps_by_id.get(bid)
+              if current_best is None:
                   apps_by_id[bid] = app
-                  if "versions" not in app:
-                      app["versions"] = []
-                  new_apps.append(app)
               else:
-                  # App duplicata → spostiamo la versione dentro quella principale
-                  if "versions" in app:
-                      apps_by_id[bid]["versions"].extend(app["versions"])
-                  else:
-                      version_entry = {
-                          "version": app.get("version", ""),
-                          "date": app.get("versionDate", ""),
-                          "size": app.get("size", 0),
-                          "downloadURL": app.get("downloadURL", ""),
-                          "localizedDescription": app.get("localizedDescription", "")
-                      }
-                      apps_by_id[bid]["versions"].append(version_entry)
+                  d1 = app.get("versionDate") or ""
+                  d2 = current_best.get("versionDate") or ""
+                  try:
+                      if datetime.fromisoformat(d1) > datetime.fromisoformat(d2):
+                          apps_by_id[bid] = app
+                  except Exception:
+                      if app.get("version", "") > current_best.get("version", ""):
+                          apps_by_id[bid] = app
 
-          data["apps"] = new_apps
+          data["apps"] = list(apps_by_id.values())
 
           with open("repo.fixed.json", "w", encoding="utf-8") as f:
               json.dump(data, f, indent=2, ensure_ascii=False)
           EOF
+
+      - name: Commit fixed JSON to repo
+        run: |
+          cp repo.fixed.json repo.altstore.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add repo.altstore.json
+          git commit -m "chore: update fixed repo.altstore.json" || echo "No changes to commit"
+          git push
 
       - name: Upload fixed JSON to Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "latest-fixed"
           name: "Latest Fixed JSON"
-          body: "Repo JSON ripulito dai duplicati (es. Kodi)."
+          body: "Repo JSON ripulito e valido per SideStore."
           files: repo.fixed.json
           overwrite_files: true
         env:
