@@ -1,10 +1,12 @@
 name: Update JSON Release
 
 on:
-  push:
-  workflow_dispatch:   # avvio manuale
+  workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *"   # ogni giorno a mezzanotte UTC
+    - cron: "0 0 * * *"   # ogni giorno
+
+permissions:
+  contents: write   # serve per creare/aggiornare le release
 
 jobs:
   release-json:
@@ -17,12 +19,13 @@ jobs:
       - name: Download JSON
         run: curl -s https://aio.zxcvbn.fyi/r/repo.altstore.json -o repo.altstore.json
 
-      - name: Create Release
+      - name: Create/Update Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: "latest"
-          release_name: "Latest JSON"
+          tag_name: latest
+          name: "Latest JSON"
           body: "Release automatica con il JSON aggiornato."
           files: repo.altstore.json
+          overwrite_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
