@@ -21,16 +21,16 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Remove duplicate versions from source.json
+      - name: Remove duplicate versions from alt/source.json
         run: |
           python << 'EOF'
           import json
           from datetime import datetime
           from pathlib import Path
 
-          src = Path("/alt/source.json")
+          src = Path("alt/source.json")
           if not src.exists():
-              raise FileNotFoundError("source.json not found in repository root")
+              raise FileNotFoundError("alt/source.json not found in repository")
 
           with src.open("r", encoding="utf-8") as f:
               data = json.load(f)
@@ -48,10 +48,10 @@ jobs:
                   if current is None:
                       versions_by_number[vnum] = ver
                   else:
-                      # Always prefer one deterministically
-                      # 1. Newer date
-                      # 2. Bigger size
-                      # 3. Keep first otherwise
+                      # Deduplication rule:
+                      # 1. Prefer newer date
+                      # 2. If same date, prefer bigger size
+                      # 3. Else keep the first
                       d1, d2 = ver.get("date"), current.get("date")
                       try:
                           d1 = datetime.fromisoformat(d1) if d1 else datetime.min
@@ -66,9 +66,8 @@ jobs:
                           versions_by_number[vnum] = ver
                       elif d1 == d2 and ver.get("size", 0) > current.get("size", 0):
                           versions_by_number[vnum] = ver
-                      # else keep the one already stored
 
-              # Now we are sure there's only 1 per version number
+              # Keep only unique versions sorted latest → oldest
               unique_versions = list(versions_by_number.values())
 
               def parse_date(v):
@@ -87,7 +86,7 @@ jobs:
           with src.open("w", encoding="utf-8") as f:
               json.dump(data, f, indent=2, ensure_ascii=False)
 
-          # Extra: log what we kept
+          # Debug log
           for app in cleaned_apps:
               seen = set()
               for ver in app["versions"]:
@@ -97,11 +96,11 @@ jobs:
 
           print(f"✅ Cleaned {len(data['apps'])} apps. Each version number is now unique.")
           EOF
-          
+
       - name: Commit changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add source.json
-          git commit -m "chore: remove duplicate versions from source.json" || echo "No changes to commit"
+          git add alt/source.json
+          git commit -m "chore: remove duplicate versions from alt/source.json" || echo "No changes to commit"
           git push
