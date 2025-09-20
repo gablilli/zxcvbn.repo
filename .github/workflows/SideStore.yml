@@ -24,7 +24,7 @@ jobs:
       - name: Download original JSON
         run: curl -s https://aio.zxcvbn.fyi/r/repo.altstore.json -o repo.altstore.json
 
-      - name: Fix JSON (remove duplicates safely)
+      - name: Fix JSON (deduplicate versions inside each app)
         run: |
           python << 'EOF'
           import json
@@ -33,39 +33,35 @@ jobs:
           with open("repo.altstore.json", "r", encoding="utf-8") as f:
               data = json.load(f)
 
-          fixed_apps = []
-          seen = set()
-
+          cleaned_apps = []
           for app in data.get("apps", []):
-              bid = app.get("bundleIdentifier")
-              ver = app.get("version")
-
-              # if both bundleIdentifier and version exist, deduplicate
-              if bid and ver:
-                  key = (bid, ver)
-                  if key in seen:
+              seen_versions = set()
+              unique_versions = []
+              for ver in app.get("versions", []):
+                  key = (ver.get("version"), ver.get("downloadURL"))
+                  if key in seen_versions:
                       continue
-                  seen.add(key)
+                  seen_versions.add(key)
+                  unique_versions.append(ver)
 
-              # always keep the app, even if malformed
-              fixed_apps.append(app)
+              # sort versions by date (descending: latest first)
+              def parse_date(v):
+                  d = v.get("date")
+                  try:
+                      return datetime.fromisoformat(d)
+                  except Exception:
+                      return datetime.min
+              unique_versions.sort(key=parse_date, reverse=True)
 
-          # sort apps (those with valid versionDate first)
-          def sort_key(app):
-              d = app.get("versionDate")
-              v = app.get("version", "")
-              try:
-                  d = datetime.fromisoformat(d) if d else datetime.min
-              except Exception:
-                  d = datetime.min
-              return (app.get("bundleIdentifier", ""), d, v)
+              app["versions"] = unique_versions
+              cleaned_apps.append(app)
 
-          fixed_apps.sort(key=sort_key)
-
-          data["apps"] = fixed_apps
+          data["apps"] = cleaned_apps
 
           with open("repo.fixed.json", "w", encoding="utf-8") as f:
               json.dump(data, f, indent=2, ensure_ascii=False)
+
+          print(f"Cleaned {len(data['apps'])} apps successfully.")
           EOF
 
       - name: Commit fixed JSON to repository
