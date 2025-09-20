@@ -1,0 +1,95 @@
+name: Clean Duplicate Versions
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *" # every day at 02:00 UTC
+
+permissions:
+  contents: write
+
+jobs:
+  clean-json:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Remove duplicate versions from source.json
+        run: |
+          python << 'EOF'
+          import json
+          from datetime import datetime
+          from pathlib import Path
+
+          src = Path("source.json")
+          if not src.exists():
+              raise FileNotFoundError("source.json not found in repository root")
+
+          with src.open("r", encoding="utf-8") as f:
+              data = json.load(f)
+
+          cleaned_apps = []
+          for app in data.get("apps", []):
+              versions_by_number = {}
+
+              for ver in app.get("versions", []):
+                  vnum = ver.get("version")
+                  if not vnum:
+                      continue
+
+                  current = versions_by_number.get(vnum)
+                  if current is None:
+                      versions_by_number[vnum] = ver
+                  else:
+                      # pick the best duplicate: prefer newer date, then bigger size
+                      d1, d2 = ver.get("date"), current.get("date")
+                      try:
+                          d1 = datetime.fromisoformat(d1) if d1 else datetime.min
+                      except Exception:
+                          d1 = datetime.min
+                      try:
+                          d2 = datetime.fromisoformat(d2) if d2 else datetime.min
+                      except Exception:
+                          d2 = datetime.min
+
+                      if d1 > d2:
+                          versions_by_number[vnum] = ver
+                      elif d1 == d2 and ver.get("size", 0) > current.get("size", 0):
+                          versions_by_number[vnum] = ver
+
+              # keep only unique versions, sorted latest → oldest
+              unique_versions = list(versions_by_number.values())
+
+              def parse_date(v):
+                  try:
+                      return datetime.fromisoformat(v.get("date", ""))
+                  except Exception:
+                      return datetime.min
+
+              unique_versions.sort(key=parse_date, reverse=True)
+
+              app["versions"] = unique_versions
+              cleaned_apps.append(app)
+
+          data["apps"] = cleaned_apps
+
+          with src.open("w", encoding="utf-8") as f:
+              json.dump(data, f, indent=2, ensure_ascii=False)
+
+          print(f"✅ Cleaned {len(data['apps'])} apps. Removed duplicate versions.")
+          EOF
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source.json
+          git commit -m "chore: remove duplicate versions from source.json" || echo "No changes to commit"
+          git push
