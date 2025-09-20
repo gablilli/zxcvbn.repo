@@ -24,7 +24,7 @@ jobs:
       - name: Download original JSON
         run: curl -s https://aio.zxcvbn.fyi/r/repo.altstore.json -o repo.altstore.json
 
-      - name: Fix JSON (remove duplicates and keep valid versions)
+      - name: Fix JSON (remove duplicates safely)
         run: |
           python << 'EOF'
           import json
@@ -39,16 +39,18 @@ jobs:
           for app in data.get("apps", []):
               bid = app.get("bundleIdentifier")
               ver = app.get("version")
-              if not bid or not ver:
-                  continue
 
-              key = (bid, ver)
-              if key in seen:
-                  continue
-              seen.add(key)
+              # if both bundleIdentifier and version exist, deduplicate
+              if bid and ver:
+                  key = (bid, ver)
+                  if key in seen:
+                      continue
+                  seen.add(key)
+
+              # always keep the app, even if malformed
               fixed_apps.append(app)
 
-          # sort by bundleIdentifier and versionDate/version
+          # sort apps (those with valid versionDate first)
           def sort_key(app):
               d = app.get("versionDate")
               v = app.get("version", "")
