@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -24,7 +24,7 @@ jobs:
       - name: Download original JSON
         run: curl -s https://aio.zxcvbn.fyi/r/repo.altstore.json -o repo.altstore.json
 
-      - name: Fix JSON (deduplicate and keep latest)
+      - name: Fix JSON (remove duplicates and keep valid versions)
         run: |
           python << 'EOF'
           import json
@@ -33,33 +33,40 @@ jobs:
           with open("repo.altstore.json", "r", encoding="utf-8") as f:
               data = json.load(f)
 
-          apps_by_id = {}
+          fixed_apps = []
+          seen = set()
 
           for app in data.get("apps", []):
               bid = app.get("bundleIdentifier")
-              if not bid:
+              ver = app.get("version")
+              if not bid or not ver:
                   continue
 
-              current_best = apps_by_id.get(bid)
-              if current_best is None:
-                  apps_by_id[bid] = app
-              else:
-                  d1 = app.get("versionDate") or ""
-                  d2 = current_best.get("versionDate") or ""
-                  try:
-                      if datetime.fromisoformat(d1) > datetime.fromisoformat(d2):
-                          apps_by_id[bid] = app
-                  except Exception:
-                      if app.get("version", "") > current_best.get("version", ""):
-                          apps_by_id[bid] = app
+              key = (bid, ver)
+              if key in seen:
+                  continue
+              seen.add(key)
+              fixed_apps.append(app)
 
-          data["apps"] = list(apps_by_id.values())
+          # sort by bundleIdentifier and versionDate/version
+          def sort_key(app):
+              d = app.get("versionDate")
+              v = app.get("version", "")
+              try:
+                  d = datetime.fromisoformat(d) if d else datetime.min
+              except Exception:
+                  d = datetime.min
+              return (app.get("bundleIdentifier", ""), d, v)
+
+          fixed_apps.sort(key=sort_key)
+
+          data["apps"] = fixed_apps
 
           with open("repo.fixed.json", "w", encoding="utf-8") as f:
               json.dump(data, f, indent=2, ensure_ascii=False)
           EOF
 
-      - name: Commit fixed JSON to repo
+      - name: Commit fixed JSON to repository
         run: |
           cp repo.fixed.json repo.altstore.json
           git config user.name "github-actions[bot]"
@@ -68,12 +75,12 @@ jobs:
           git commit -m "chore: update fixed repo.altstore.json" || echo "No changes to commit"
           git push
 
-      - name: Upload fixed JSON to Release
+      - name: Upload fixed JSON to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "latest-fixed"
           name: "Latest Fixed JSON"
-          body: "Repo JSON ripulito e valido per SideStore."
+          body: "Cleaned and valid repo JSON for SideStore."
           files: repo.fixed.json
           overwrite_files: true
         env:
