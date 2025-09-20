@@ -24,7 +24,7 @@ jobs:
       - name: Download original JSON
         run: curl -s https://aio.zxcvbn.fyi/r/repo.altstore.json -o repo.altstore.json
 
-      - name: Fix JSON (deduplicate versions inside each app)
+      - name: Fix JSON (deduplicate versions by version number)
         run: |
           python << 'EOF'
           import json
@@ -35,16 +35,37 @@ jobs:
 
           cleaned_apps = []
           for app in data.get("apps", []):
-              seen_versions = set()
-              unique_versions = []
-              for ver in app.get("versions", []):
-                  key = (ver.get("version"), ver.get("downloadURL"))
-                  if key in seen_versions:
-                      continue
-                  seen_versions.add(key)
-                  unique_versions.append(ver)
+              versions_by_number = {}
 
-              # sort versions by date (descending: latest first)
+              for ver in app.get("versions", []):
+                  vnum = ver.get("version")
+                  if not vnum:
+                      continue
+
+                  current = versions_by_number.get(vnum)
+                  if current is None:
+                      versions_by_number[vnum] = ver
+                  else:
+                      # pick the "best" duplicate
+                      d1, d2 = ver.get("date"), current.get("date")
+                      try:
+                          d1 = datetime.fromisoformat(d1) if d1 else datetime.min
+                      except Exception:
+                          d1 = datetime.min
+                      try:
+                          d2 = datetime.fromisoformat(d2) if d2 else datetime.min
+                      except Exception:
+                          d2 = datetime.min
+
+                      if d1 > d2:
+                          versions_by_number[vnum] = ver
+                      elif d1 == d2:
+                          # fallback: keep larger file
+                          if ver.get("size", 0) > current.get("size", 0):
+                              versions_by_number[vnum] = ver
+
+              # keep only unique versions, sorted by date desc
+              unique_versions = list(versions_by_number.values())
               def parse_date(v):
                   d = v.get("date")
                   try:
@@ -63,7 +84,7 @@ jobs:
 
           print(f"Cleaned {len(data['apps'])} apps successfully.")
           EOF
-
+          
       - name: Commit fixed JSON to repository
         run: |
           cp repo.fixed.json repo.altstore.json
