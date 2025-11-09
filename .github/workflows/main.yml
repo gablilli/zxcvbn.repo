@@ -1,9 +1,5 @@
 # name: Update JSON Release
 #
-# on:
-#  workflow_dispatch:
-#  schedule:
-#    - cron: "0 0 * * *"   # ogni giorno
 #
 # permissions:
 #  contents: write   # serve per creare/aggiornare le release
